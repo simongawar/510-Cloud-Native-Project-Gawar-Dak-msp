@@ -1,35 +1,94 @@
-version: '3.8'
-
 services:
-  mysql-db:
+  database:
     image: mysql:8.0
-    container_name: mysql-db-container
-    environment:
-      MYSQL_ROOT_PASSWORD: root@2025db
-      MYSQL_DATABASE: ostock_db
     ports:
-      - "3307:3306"
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "root@2025db" 
+      MYSQL_DATABASE: "ostock_dev"
     volumes:
-      - mysql-data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/1-init.sql
+      - ./data.sql:/docker-entrypoint-initdb.d/2-data.sql
+    networks:
+      backend:
+        aliases:
+          - "database"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot@2025db"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot@2025db"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
-
-  my-microservice:
-    image: optimagrowth/license-service:0.0.1-SNAPSHOT
-    container_name: microservice-license-app
-    depends_on:
-      mysql-db:
-        condition: service_healthy
+      start_period: 20s 
+      
+  configserver:
+    # --- CORRECTED PATH: ../config-server ---
+    build: 
+      context: ../configserver
+    ports:
+      - "8071:8071"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306/ostock_db?allowPublicKeyRetrieval=true&useSSL=false
-      - SPRING_DATASOURCE_USERNAME=root
-      - SPRING_DATASOURCE_PASSWORD=root@2025db
+      ENCRYPT_KEY: "fje83Ki8403Iod87dne7Yjsl3THueh48jfuO9j4U2hf64Lo"
+    networks:
+      backend:
+        aliases:
+          - "configserver"
+          
+  eurekaserver:
+    # --- CORRECTED PATH: ../eureka-server ---
+    build: 
+      context: ../eurekaserver
+    ports:
+      - "8070:8070"
+    depends_on:
+      database:
+        condition: service_healthy
+      configserver:
+        condition: service_started 
+    networks:
+      backend:
+        aliases:
+          - "eurekaserver"
+          
+  licensingservice:
+    # --- CORRECTED PATH: ../licensingservice ---
+    build: 
+      context: ../licensing-service
+    environment:
+      PROFILE: "dev"
+      CONFIGSERVER_URI: "http://configserver:8071"
+      CONFIGSERVER_PORT: "8071"
+      DATABASESERVER_PORT: "3306"
+      ENCRYPT_KEY: "IMSYMMETRIC"
+    depends_on:
+      database:
+        condition: service_healthy
+      configserver:
+        condition: service_started
     ports:
       - "8080:8080"
+    networks:
+      - backend
+      
+  organizationservice:
+    # --- CORRECTED PATH: ../organization-service (Confirmed by your folder name) ---
+    build: 
+      context: ../organization-service
+    environment:
+      PROFILE: "dev"
+      CONFIGSERVER_URI: "http://configserver:8071"
+      CONFIGSERVER_PORT: "8071"
+      DATABASESERVER_PORT: "3306"
+      ENCRYPT_KEY: "IMSYMMETRIC"
+    depends_on:
+      database:
+        condition: service_healthy
+      configserver:
+        condition: service_started
+    ports:
+      - "8081:8081"
+    networks:
+      - backend
 
-volumes:
-  mysql-data:
+networks:
+  backend:
+    driver: bridge
